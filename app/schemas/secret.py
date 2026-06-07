@@ -6,16 +6,24 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.datetime import ensure_aware_utc
 
+
+SECRET_PATH_PATTERN = r"^[a-zA-Z0-9._/\-]+$"
+
 SecretPath = Annotated[
     str,
     Field(
         min_length=3,
         max_length=512,
-        pattern=r"^[a-zA-Z0-9._/\-]+$",
+        pattern=SECRET_PATH_PATTERN,
     ),
 ]
 
-Capability = Literal["read", "update", "delete", "rotate", "manage_policy"]
+Capability = Literal[
+    "read",
+    "delete",
+    "rotate",
+    "manage_policy",
+]
 
 
 class SecretCreateRequest(BaseModel):

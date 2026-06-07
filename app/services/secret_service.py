@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 from app.core.audit_actions import AuditAction, AuditStatus
 from app.core.config import settings
 from app.core.datetime import ensure_aware_utc, utc_now
-from app.core.encryption import DecryptionError, decrypt_secret_value, encrypt_secret_value
+from app.core.encryption import (
+    DecryptionError,
+    decrypt_secret_value,
+    encrypt_secret_value,
+)
 from app.models.secrets import AccessPolicy, Secret, SecretVersion
 from app.repositories.identity import get_principal_by_id
 from app.repositories.secrets import (
@@ -20,7 +24,12 @@ from app.services.audit_service import write_audit_event
 from app.services.auth_service import AuthenticatedPrincipal
 
 
-OWNER_CAPABILITIES = ["read", "update", "delete", "rotate", "manage_policy"]
+OWNER_CAPABILITIES = [
+    "read",
+    "delete",
+    "rotate",
+    "manage_policy",
+]
 
 
 class SecretAlreadyExistsError(Exception):
@@ -59,6 +68,7 @@ def create_secret(
     expires_at = ensure_aware_utc(expires_at)
 
     existing_secret = get_secret_by_path(db, path)
+
     if existing_secret is not None:
         write_audit_event(
             db=db,
@@ -76,6 +86,7 @@ def create_secret(
         owner_principal_id=current_principal.id,
         current_version=1,
     )
+
     db.add(secret)
     db.flush()
 
@@ -87,6 +98,7 @@ def create_secret(
         created_by=current_principal.id,
         expires_at=expires_at,
     )
+
     db.add(secret_version)
 
     for capability in OWNER_CAPABILITIES:
@@ -109,6 +121,7 @@ def create_secret(
 
     db.commit()
     db.refresh(secret)
+
     return secret
 
 
@@ -119,6 +132,7 @@ def read_secret_value(
     request: Request | None = None,
 ) -> tuple[Secret, SecretVersion, str]:
     secret = get_secret_by_path(db, path)
+
     if secret is None:
         raise SecretNotFoundError
 
@@ -135,6 +149,7 @@ def read_secret_value(
         raise SecretAccessDeniedError
 
     secret_version = get_current_secret_version(db, secret)
+
     if secret_version is None:
         raise SecretNotFoundError
 
@@ -172,6 +187,7 @@ def read_secret_value(
         secret_id=secret.id,
         request=request,
     )
+
     db.commit()
 
     return secret, secret_version, plaintext
@@ -188,6 +204,7 @@ def rotate_secret_value(
     expires_at = ensure_aware_utc(expires_at)
 
     secret = get_secret_by_path(db, path)
+
     if secret is None:
         raise SecretNotFoundError
 
@@ -204,6 +221,7 @@ def rotate_secret_value(
         raise SecretAccessDeniedError
 
     next_version = get_next_secret_version_number(db, secret.id)
+
     secret_version = SecretVersion(
         secret_id=secret.id,
         version=next_version,
@@ -230,6 +248,7 @@ def rotate_secret_value(
 
     db.commit()
     db.refresh(secret)
+
     return secret
 
 
@@ -240,6 +259,7 @@ def delete_secret(
     request: Request | None = None,
 ) -> None:
     secret = get_secret_by_path(db, path)
+
     if secret is None:
         raise SecretNotFoundError
 
@@ -257,6 +277,7 @@ def delete_secret(
 
     secret.is_deleted = True
     secret.updated_at = utc_now()
+
     db.add(secret)
 
     write_audit_event(
@@ -267,6 +288,7 @@ def delete_secret(
         secret_id=secret.id,
         request=request,
     )
+
     db.commit()
 
 
@@ -279,6 +301,7 @@ def grant_secret_access(
     request: Request | None = None,
 ) -> AccessPolicy:
     secret = get_secret_by_path(db, secret_path)
+
     if secret is None:
         raise SecretNotFoundError
 
@@ -300,6 +323,7 @@ def grant_secret_access(
         raise SecretAccessDeniedError
 
     target_principal = get_principal_by_id(db, target_principal_id)
+
     if target_principal is None or not target_principal.is_active:
         raise TargetPrincipalNotFoundError
 
@@ -322,4 +346,5 @@ def grant_secret_access(
 
     db.commit()
     db.refresh(policy)
+
     return policy

@@ -1,12 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.dependencies import get_current_principal, require_roles
 from app.db.dependencies import get_db
 from app.repositories.secrets import list_accessible_secrets
 from app.schemas.secret import (
+    SECRET_PATH_PATTERN,
     SecretCreateRequest,
     SecretMetadataResponse,
     SecretRotateRequest,
@@ -27,6 +28,16 @@ from app.services.secret_service import (
 
 
 router = APIRouter(prefix="/secrets", tags=["secrets"])
+
+
+SecretPathParam = Annotated[
+    str,
+    Path(
+        min_length=3,
+        max_length=512,
+        pattern=SECRET_PATH_PATTERN,
+    ),
+]
 
 
 def to_secret_metadata_response(secret) -> SecretMetadataResponse:
@@ -85,11 +96,13 @@ def list_secrets_endpoint(
     can_see_all_metadata = bool(
         {"admin", "auditor"}.intersection(current_principal.roles)
     )
+
     secrets = list_accessible_secrets(
         db=db,
         principal_id=current_principal.id,
         can_see_all_metadata=can_see_all_metadata,
     )
+
     return [to_secret_metadata_response(secret) for secret in secrets]
 
 
@@ -98,7 +111,7 @@ def list_secrets_endpoint(
     response_model=SecretMetadataResponse,
 )
 def rotate_secret_endpoint(
-    secret_path: str,
+    secret_path: SecretPathParam,
     payload: SecretRotateRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -132,7 +145,7 @@ def rotate_secret_endpoint(
 
 @router.get("/{secret_path:path}", response_model=SecretValueResponse)
 def read_secret_endpoint(
-    secret_path: str,
+    secret_path: SecretPathParam,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_principal: Annotated[
@@ -183,7 +196,7 @@ def read_secret_endpoint(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_secret_endpoint(
-    secret_path: str,
+    secret_path: SecretPathParam,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_principal: Annotated[

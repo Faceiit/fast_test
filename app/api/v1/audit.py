@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.dependencies import require_roles
@@ -14,6 +14,16 @@ from app.services.auth_service import AuthenticatedPrincipal
 
 
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+
+def normalize_query_datetime(value: datetime | None, field_name: str) -> datetime | None:
+    try:
+        return ensure_aware_utc(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be timezone-aware",
+        ) from exc
 
 
 @router.get("", response_model=list[AuditLogResponse])
@@ -40,8 +50,8 @@ def list_audit_logs_endpoint(
         action=action,
         status=status,
         request_id=request_id,
-        created_from=ensure_aware_utc(created_from),
-        created_to=ensure_aware_utc(created_to),
+        created_from=normalize_query_datetime(created_from, "created_from"),
+        created_to=normalize_query_datetime(created_to, "created_to"),
     )
 
     return [

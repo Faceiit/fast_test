@@ -1,15 +1,20 @@
 import uuid
+from typing import Protocol
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.models.secrets import AuditLog
-from app.services.auth_service import AuthenticatedPrincipal
+
+
+class AuditActor(Protocol):
+    id: uuid.UUID
+    principal_type: str
 
 
 def write_audit_event(
     db: Session,
-    actor: AuthenticatedPrincipal | None,
+    actor: AuditActor | None,
     action: str,
     status: str,
     secret_id: uuid.UUID | None = None,
@@ -22,6 +27,7 @@ def write_audit_event(
     if request is not None:
         ip_address = request.client.host if request.client is not None else None
         user_agent = request.headers.get("user-agent")
+
         request_id = getattr(request.state, "request_id", None)
         if request_id is None:
             request_id = request.headers.get("x-request-id")

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models.secrets import AccessPolicy, Secret, SecretVersion
@@ -41,9 +41,6 @@ def has_secret_capability(
     principal_id: uuid.UUID,
     capability: str,
 ) -> bool:
-    if secret.owner_principal_id == principal_id:
-        return True
-
     statement = select(AccessPolicy.id).where(
         AccessPolicy.principal_id == principal_id,
         AccessPolicy.secret_id == secret.id,
@@ -69,7 +66,7 @@ def list_accessible_secrets(
 
     statement = (
         select(Secret)
-        .outerjoin(
+        .join(
             AccessPolicy,
             and_(
                 AccessPolicy.secret_id == Secret.id,
@@ -77,13 +74,7 @@ def list_accessible_secrets(
                 AccessPolicy.capability == "read",
             ),
         )
-        .where(
-            Secret.is_deleted.is_(False),
-            or_(
-                Secret.owner_principal_id == principal_id,
-                AccessPolicy.id.is_not(None),
-            ),
-        )
+        .where(Secret.is_deleted.is_(False))
         .order_by(Secret.path)
     )
 
