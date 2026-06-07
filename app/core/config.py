@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Secret Management Service"
     app_env: str = "dev"
     app_debug: bool = True
+    docs_enabled: bool = True
 
     api_v1_prefix: str = "/api/v1"
 
@@ -36,13 +37,13 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         return URL.create(
-                drivername="postgresql+psycopg",
-                username=self.postgres_user,
-                password=self.postgres_password,
-                host=self.postgres_host,
-                port=self.postgres_port,
-                database=self.postgres_db,
-            ).render_as_string(hide_password=False)
+            drivername="postgresql+psycopg",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        ).render_as_string(hide_password=False)
 
 
 @lru_cache

@@ -1,0 +1,26 @@
+diff --git a/scripts/hardening_fallback.py b/scripts/hardening_fallback.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/scripts/hardening_fallback.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++"""Fallback helper for hardening patches.
++
++Run this only if direct `git apply patches/*.patch` fails. The helper prints the
++recommended fallback workflow and exits; it does not overwrite files by itself.
++"""
++
++from __future__ import annotations
++
++print(
++    "Direct patches are the source of truth. If a patch fails because your local "
++    "files differ from GitHub main, run:
++
++"
++    "  git apply --reject --whitespace=fix patches/<failed-patch>.patch
++
++"
++    "Then open the generated *.rej files, copy only the rejected hunks manually, "
++    "run `python -m compileall app scripts`, and commit the result."
++)

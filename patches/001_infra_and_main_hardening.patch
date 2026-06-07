@@ -1,0 +1,354 @@
+diff --git a/app/main.py b/app/main.py
+index 1111111..2222222 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -1 +1,108 @@
+-from fastapi import Depends, FastAPI from sqlalchemy import text from sqlalchemy.orm import Session from app.api.v1.router import api_router from app.core.config import settings from app.db.dependencies import get_db app = FastAPI( title=settings.app_name, debug=settings.app_debug, ) app.include_router(api_router, prefix=settings.api_v1_prefix) @app.get("/health") def health_check() -> dict[str, str]: return { "status": "ok", "service": settings.app_name, "environment": settings.app_env, } @app.get(f"{settings.api_v1_prefix}/health") def api_health_check() -> dict[str, str]: return { "status": "ok", "api_prefix": settings.api_v1_prefix, } @app.get(f"{settings.api_v1_prefix}/health/db") def database_health_check(db: Session = Depends(get_db)) -> dict[str, str]: db.execute(text("SELECT 1")) return { "status": "ok", "database": "postgresql", }
++import logging
++import uuid
++from contextlib import asynccontextmanager
++
++from fastapi import Depends, FastAPI, HTTPException, Request, status
++from fastapi.responses import JSONResponse
++from sqlalchemy import text
++from sqlalchemy.exc import SQLAlchemyError
++from sqlalchemy.orm import Session
++
++from app.api.v1.router import api_router
++from app.core.config import settings
++from app.db.dependencies import get_db
++
++
++logger = logging.getLogger(__name__)
++
++
++def validate_runtime_settings() -> None:
++    if settings.jwt_algorithm != "HS256":
++        raise RuntimeError("Only HS256 JWT algorithm is supported")
++
++    if settings.app_env == "dev":
++        return
++
++    if settings.app_debug:
++        raise RuntimeError("APP_DEBUG must be false outside dev")
++
++    if settings.postgres_password in {"change_me", "change_me_dev_only"}:
++        raise RuntimeError("POSTGRES_PASSWORD must be changed outside dev")
++
++    if settings.jwt_secret_key.startswith("change_me"):
++        raise RuntimeError("JWT_SECRET_KEY must be changed outside dev")
++
++    if settings.api_key_pepper.startswith("change_me"):
++        raise RuntimeError("API_KEY_PEPPER must be changed outside dev")
++
++
++@asynccontextmanager
++async def lifespan(app: FastAPI):
++    validate_runtime_settings()
++    yield
++
++
++app = FastAPI(
++    title=settings.app_name,
++    debug=settings.app_debug,
++    docs_url="/docs" if settings.docs_enabled else None,
++    redoc_url="/redoc" if settings.docs_enabled else None,
++    openapi_url="/openapi.json" if settings.docs_enabled else None,
++    lifespan=lifespan,
++)
++
++app.include_router(api_router, prefix=settings.api_v1_prefix)
++
++
++@app.middleware("http")
++async def request_id_middleware(request: Request, call_next):
++    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
++    request.state.request_id = request_id
++
++    response = await call_next(request)
++    response.headers["X-Request-ID"] = request_id
++
++    return response
++
++
++@app.exception_handler(SQLAlchemyError)
++async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
++    request_id = getattr(request.state, "request_id", None)
++    logger.exception("Database error", extra={"request_id": request_id})
++    return JSONResponse(
++        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
++        content={"detail": "Database is unavailable", "request_id": request_id},
++    )
++
++
++@app.exception_handler(Exception)
++async def unhandled_exception_handler(request: Request, exc: Exception):
++    request_id = getattr(request.state, "request_id", None)
++    logger.exception("Unhandled application error", extra={"request_id": request_id})
++    return JSONResponse(
++        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
++        content={"detail": "Internal server error", "request_id": request_id},
++    )
++
++
++@app.get("/health", include_in_schema=False)
++@app.get(f"{settings.api_v1_prefix}/health")
++def health_check() -> dict[str, str]:
++    return {
++        "status": "ok",
++        "service": settings.app_name,
++        "api_prefix": settings.api_v1_prefix,
++    }
++
++
++@app.get(f"{settings.api_v1_prefix}/health/db")
++def database_health_check(db: Session = Depends(get_db)) -> dict[str, str]:
++    try:
++        db.execute(text("SELECT 1"))
++    except SQLAlchemyError:
++        raise HTTPException(
++            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
++            detail="Database is unavailable",
++        )
++
++    return {"status": "ok", "database": "postgresql"}
+diff --git a/app/core/config.py b/app/core/config.py
+index 1111111..2222222 100644
+--- a/app/core/config.py
++++ b/app/core/config.py
+@@ -1 +1,54 @@
+-from functools import lru_cache from pydantic_settings import BaseSettings, SettingsConfigDict from sqlalchemy.engine import URL class Settings(BaseSettings): app_name: str = "Secret Management Service" app_env: str = "dev" app_debug: bool = True api_v1_prefix: str = "/api/v1" postgres_host: str = "postgres" postgres_port: int = 5432 postgres_db: str = "secret_manager" postgres_user: str = "secret_manager" postgres_password: str = "change_me" jwt_secret_key: str = "change_me_generate_real_value" jwt_algorithm: str = "HS256" access_token_expire_minutes: int = 30 api_key_pepper: str = "change_me_generate_real_value" log_level: str = "INFO" master_key_file: str = "/run/secrets/sms_master_key" encryption_key_version: str = "local-v1" model_config = SettingsConfigDict( env_file=".env", env_file_encoding="utf-8", extra="ignore", ) @property def database_url(self) -> str: return URL.create( drivername="postgresql+psycopg", username=self.postgres_user, password=self.postgres_password, host=self.postgres_host, port=self.postgres_port, database=self.postgres_db, ).render_as_string(hide_password=False) @lru_cache def get_settings() -> Settings: return Settings() settings = get_settings()
++from functools import lru_cache
++
++from pydantic_settings import BaseSettings, SettingsConfigDict
++from sqlalchemy.engine import URL
++
++
++class Settings(BaseSettings):
++    app_name: str = "Secret Management Service"
++    app_env: str = "dev"
++    app_debug: bool = True
++    docs_enabled: bool = True
++
++    api_v1_prefix: str = "/api/v1"
++
++    postgres_host: str = "postgres"
++    postgres_port: int = 5432
++    postgres_db: str = "secret_manager"
++    postgres_user: str = "secret_manager"
++    postgres_password: str = "change_me"
++
++    jwt_secret_key: str = "change_me_generate_real_value"
++    jwt_algorithm: str = "HS256"
++    access_token_expire_minutes: int = 30
++    api_key_pepper: str = "change_me_generate_real_value"
++
++    log_level: str = "INFO"
++
++    master_key_file: str = "/run/secrets/sms_master_key"
++    encryption_key_version: str = "local-v1"
++
++    model_config = SettingsConfigDict(
++        env_file=".env",
++        env_file_encoding="utf-8",
++        extra="ignore",
++    )
++
++    @property
++    def database_url(self) -> str:
++        return URL.create(
++            drivername="postgresql+psycopg",
++            username=self.postgres_user,
++            password=self.postgres_password,
++            host=self.postgres_host,
++            port=self.postgres_port,
++            database=self.postgres_db,
++        ).render_as_string(hide_password=False)
++
++
++@lru_cache
++def get_settings() -> Settings:
++    return Settings()
++
++
++settings = get_settings()
+diff --git a/.env.example b/.env.example
+index 1111111..2222222 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1 +1,28 @@
+-# Application APP_NAME = "Secret Management Service" APP_ENV = dev APP_DEBUG = true # API API_V1_PREFIX = /api/v1 # PostgreSQL POSTGRES_HOST = postgres POSTGRES_PORT = 5432 POSTGRES_DB = secret_manager POSTGRES_USER = secret_manager POSTGRES_PASSWORD = change_me # Security JWT_SECRET_KEY = change_me_generate_real_value JWT_ALGORITHM = HS256 ACCESS_TOKEN_EXPIRE_MINUTES = 30 API_KEY_PEPPER = change_me_generate_real_value # Encryption MASTER_KEY_FILE = /run/secrets/sms_master_key ENCRYPTION_KEY_VERSION = local-v1 # Logging LOG_LEVEL = INFO
++# Application
++APP_NAME="Secret Management Service"
++APP_ENV=dev
++APP_DEBUG=true
++DOCS_ENABLED=true
++
++# API
++API_V1_PREFIX=/api/v1
++
++# PostgreSQL
++POSTGRES_HOST=postgres
++POSTGRES_PORT=5432
++POSTGRES_DB=secret_manager
++POSTGRES_USER=secret_manager
++POSTGRES_PASSWORD=change_me_dev_only
++
++# Security
++JWT_SECRET_KEY=change_me_generate_real_value_dev_only
++JWT_ALGORITHM=HS256
++ACCESS_TOKEN_EXPIRE_MINUTES=30
++API_KEY_PEPPER=change_me_generate_real_value_dev_only
++
++# Encryption
++MASTER_KEY_FILE=/run/secrets/sms_master_key
++ENCRYPTION_KEY_VERSION=local-v1
++
++# Logging
++LOG_LEVEL=INFO
+diff --git a/scripts/generate_master_key.py b/scripts/generate_master_key.py
+index 1111111..2222222 100644
+--- a/scripts/generate_master_key.py
++++ b/scripts/generate_master_key.py
+@@ -1 +1,29 @@
+-from pathlib import Path from cryptography.fernet import Fernet Path("secrets").mkdir(exist_ok=True) Path("../secrets/sms_master_key").write_text( Fernet.generate_key().decode("utf-8") + "\n", encoding="utf-8", )
++from pathlib import Path
++
++from cryptography.fernet import Fernet
++
++
++PROJECT_ROOT = Path(__file__).resolve().parents[1]
++SECRETS_DIR = PROJECT_ROOT / "secrets"
++MASTER_KEY_FILE = SECRETS_DIR / "sms_master_key"
++
++
++def main() -> None:
++    SECRETS_DIR.mkdir(exist_ok=True)
++
++    if MASTER_KEY_FILE.exists():
++        raise FileExistsError(
++            f"Master key already exists: {MASTER_KEY_FILE}\n"
++            "Delete it manually only if you are sure you do not need old encrypted secrets."
++        )
++
++    MASTER_KEY_FILE.write_text(
++        Fernet.generate_key().decode("utf-8") + "\n",
++        encoding="utf-8",
++    )
++
++    print(f"Master key written to: {MASTER_KEY_FILE}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/nginx/nginx.conf b/nginx/nginx.conf
+index 1111111..2222222 100644
+--- a/nginx/nginx.conf
++++ b/nginx/nginx.conf
+@@ -1 +1,105 @@
+-events { worker_connections 1024; } http { include /etc/nginx/mime.types; default_type application/octet-stream; server_tokens off; log_format main '$remote_addr - $remote_user [$time_local] "$request" ' '$status $body_bytes_sent "$http_referer" ' '"$http_user_agent" "$http_x_forwarded_for" ' 'request_id="$request_id"'; access_log /var/log/nginx/access.log main; error_log /var/log/nginx/error.log warn; sendfile on; keepalive_timeout 65; client_max_body_size 1m; limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s; upstream fastapi_backend { server api:8000; keepalive 32; } server { listen 80; server_name _; location = /health { access_log off; proxy_pass http://fastapi_backend/health; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto http; proxy_set_header X-Request-ID $request_id; } location / { return 301 https://$host:8443$request_uri; } } server { listen 443 ssl; server_name _; ssl_certificate /etc/nginx/certs/nginx.crt; ssl_certificate_key /etc/nginx/certs/nginx.key; ssl_protocols TLSv1.2 TLSv1.3; ssl_prefer_server_ciphers off; add_header X-Content-Type-Options "nosniff" always; add_header X-Frame-Options "DENY" always; add_header Referrer-Policy "no-referrer" always; add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always; add_header X-Request-ID "$request_id" always; location = /health { access_log off; proxy_pass http://fastapi_backend/health; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Request-ID $request_id; } location / { limit_req zone=api_limit burst=20 nodelay; proxy_pass http://fastapi_backend; proxy_http_version 1.1; proxy_set_header Connection ""; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Request-ID $request_id; proxy_connect_timeout 5s; proxy_send_timeout 30s; proxy_read_timeout 30s; } } }
++events {
++    worker_connections 1024;
++}
++
++http {
++    include /etc/nginx/mime.types;
++    default_type application/octet-stream;
++
++    server_tokens off;
++
++    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
++                    '$status $body_bytes_sent "$http_referer" '
++                    '"$http_user_agent" "$http_x_forwarded_for" '
++                    'request_id="$request_id"';
++
++    access_log /var/log/nginx/access.log main;
++    error_log /var/log/nginx/error.log warn;
++
++    sendfile on;
++    keepalive_timeout 65;
++    client_max_body_size 1m;
++
++    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
++    limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;
++
++    upstream fastapi_backend {
++        server api:8000;
++        keepalive 32;
++    }
++
++    server {
++        listen 80;
++        server_name _;
++
++        location = /health {
++            access_log off;
++            proxy_pass http://fastapi_backend/health;
++            proxy_set_header Host $host;
++            proxy_set_header X-Real-IP $remote_addr;
++            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++            proxy_set_header X-Forwarded-Proto http;
++            proxy_set_header X-Request-ID $request_id;
++        }
++
++        location / {
++            return 301 https://$host:8443$request_uri;
++        }
++    }
++
++    server {
++        listen 443 ssl;
++        server_name _;
++
++        ssl_certificate /etc/nginx/certs/nginx.crt;
++        ssl_certificate_key /etc/nginx/certs/nginx.key;
++        ssl_protocols TLSv1.2 TLSv1.3;
++        ssl_prefer_server_ciphers off;
++
++        add_header X-Content-Type-Options "nosniff" always;
++        add_header X-Frame-Options "DENY" always;
++        add_header Referrer-Policy "no-referrer" always;
++        add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
++        add_header X-Request-ID "$request_id" always;
++
++        location = /health {
++            access_log off;
++            proxy_pass http://fastapi_backend/health;
++            proxy_set_header Host $host;
++            proxy_set_header X-Real-IP $remote_addr;
++            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++            proxy_set_header X-Forwarded-Proto https;
++            proxy_set_header X-Request-ID $request_id;
++        }
++
++        location = /api/v1/auth/login {
++            limit_req zone=login_limit burst=5 nodelay;
++            proxy_pass http://fastapi_backend;
++            proxy_http_version 1.1;
++            proxy_set_header Connection "";
++            proxy_set_header Host $host;
++            proxy_set_header X-Real-IP $remote_addr;
++            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++            proxy_set_header X-Forwarded-Proto https;
++            proxy_set_header X-Request-ID $request_id;
++            proxy_connect_timeout 5s;
++            proxy_send_timeout 30s;
++            proxy_read_timeout 30s;
++        }
++
++        location / {
++            limit_req zone=api_limit burst=20 nodelay;
++            proxy_pass http://fastapi_backend;
++            proxy_http_version 1.1;
++            proxy_set_header Connection "";
++            proxy_set_header Host $host;
++            proxy_set_header X-Real-IP $remote_addr;
++            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++            proxy_set_header X-Forwarded-Proto https;
++            proxy_set_header X-Request-ID $request_id;
++            proxy_connect_timeout 5s;
++            proxy_send_timeout 30s;
++            proxy_read_timeout 30s;
++        }
++    }
++}

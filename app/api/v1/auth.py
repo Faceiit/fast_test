@@ -34,7 +34,6 @@ def login(
     access_token = create_access_token(
         principal_id=principal.id,
         principal_type=principal.principal_type,
-        roles=principal.roles,
     )
 
     return TokenResponse(

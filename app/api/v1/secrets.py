@@ -16,6 +16,8 @@ from app.services.auth_service import AuthenticatedPrincipal
 from app.services.secret_service import (
     SecretAccessDeniedError,
     SecretAlreadyExistsError,
+    SecretDecryptionFailedError,
+    SecretExpiredError,
     SecretNotFoundError,
     create_secret,
     delete_secret,
@@ -83,13 +85,11 @@ def list_secrets_endpoint(
     can_see_all_metadata = bool(
         {"admin", "auditor"}.intersection(current_principal.roles)
     )
-
     secrets = list_accessible_secrets(
         db=db,
         principal_id=current_principal.id,
         can_see_all_metadata=can_see_all_metadata,
     )
-
     return [to_secret_metadata_response(secret) for secret in secrets]
 
 
@@ -156,6 +156,16 @@ def read_secret_endpoint(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient secret permissions",
+        )
+    except SecretExpiredError:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Secret version has expired",
+        )
+    except SecretDecryptionFailedError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Secret cannot be decrypted",
         )
 
     return SecretValueResponse(

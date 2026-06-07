@@ -1,9 +1,12 @@
+import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.v1.dependencies import require_roles
+from app.core.datetime import ensure_aware_utc
 from app.db.dependencies import get_db
 from app.repositories.audit import list_audit_logs
 from app.schemas.audit import AuditLogResponse
@@ -21,8 +24,25 @@ def list_audit_logs_endpoint(
         Depends(require_roles("admin", "auditor")),
     ],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    actor_id: uuid.UUID | None = None,
+    secret_id: uuid.UUID | None = None,
+    action: str | None = None,
+    status: str | None = None,
+    request_id: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
 ) -> list[AuditLogResponse]:
-    audit_logs = list_audit_logs(db=db, limit=limit)
+    audit_logs = list_audit_logs(
+        db=db,
+        limit=limit,
+        actor_id=actor_id,
+        secret_id=secret_id,
+        action=action,
+        status=status,
+        request_id=request_id,
+        created_from=ensure_aware_utc(created_from),
+        created_to=ensure_aware_utc(created_to),
+    )
 
     return [
         AuditLogResponse(

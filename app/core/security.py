@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from app.core.config import settings
 
 
 password_hash = PasswordHash.recommended()
+API_KEY_PREFIX_RE = re.compile(r"^smsk_live_[a-f0-9]{16}$")
 
 
 def hash_password(password: str) -> str:
@@ -26,18 +28,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(
     principal_id: uuid.UUID,
     principal_type: str,
-    roles: list[str],
 ) -> str:
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.access_token_expire_minutes)
-    
+
     payload: dict[str, Any] = {
-        "sub": str(principal_id),   # Кому выдан (ID субъекта)
-        "type": principal_type,     # Тип ('user' или 'service_account')
-        "roles": roles,             # Список ролей (например, ['admin'])
-        "iat": int(now.timestamp()), # Время выдачи токена (Issued At)
-        "exp": int(expires_at.timestamp()), # Время окончания действия (Expiration)
-        "iss": settings.app_name,   # Кто выдал токен (Issuer)
+        "sub": str(principal_id),
+        "type": principal_type,
+        "iat": int(now.timestamp()),
+        "exp": int(expires_at.timestamp()),
+        "iss": settings.app_name,
     }
 
     return jwt.encode(
@@ -48,7 +48,6 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
-    # Функция jwt.decode автоматически проверяет всё: не истекло ли время "exp", совпадает ли "iss", не подделана ли цифровая подпись
     try:
         return jwt.decode(
             token,
@@ -61,22 +60,20 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
 
 
 def generate_api_key() -> tuple[str, str]:
-    public_part = secrets.token_hex(4)     # 8 символов (например: 'a1b2c3d4')
-    secret_part = secrets.token_urlsafe(32) # Длинный случайный криптографический хвост
-
-    prefix = f"smsk_live_{public_part}"    # Префикс, например: 'smsk_live_a1b2c3d4'
-    raw_api_key = f"{prefix}.{secret_part}" # Полный ключ: 'smsk_live_a1b2c3d4.xxxx...'
-
+    public_part = secrets.token_hex(8)
+    secret_part = secrets.token_urlsafe(32)
+    prefix = f"smsk_live_{public_part}"
+    raw_api_key = f"{prefix}.{secret_part}"
     return raw_api_key, prefix
 
 
 def get_api_key_prefix(api_key: str) -> str | None:
-    if "." not in api_key:
+    prefix, separator, secret_part = api_key.partition(".")
+
+    if separator != "." or not secret_part:
         return None
 
-    prefix, _ = api_key.split(".", maxsplit=1)
-
-    if not prefix.startswith("smsk_live_"):
+    if API_KEY_PREFIX_RE.fullmatch(prefix) is None:
         return None
 
     return prefix

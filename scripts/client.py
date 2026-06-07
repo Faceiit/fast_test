@@ -14,7 +14,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_BASE_URL = "https://127.0.0.1:8443"
 API_PREFIX = "/api/v1"
 
 JsonValue = dict[str, Any] | list[Any]
@@ -543,7 +543,7 @@ def secrets_menu(client: FastApiClient, ui: Ui) -> None:
 
 
 def policies_menu(client: FastApiClient, ui: Ui) -> None:
-    capabilities = ["read", "create", "update", "delete", "rotate", "manage_policy"]
+    capabilities = ["read", "update", "delete", "rotate", "manage_policy"]
 
     while True:
         ui.header(client)
