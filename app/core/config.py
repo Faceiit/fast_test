@@ -6,7 +6,6 @@ from sqlalchemy.engine import URL
 
 class Settings(BaseSettings):
     app_name: str = "Secret Management Service"
-    app_env: str = "dev"
     app_debug: bool = True
     docs_enabled: bool = True
 

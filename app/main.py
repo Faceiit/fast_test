@@ -20,20 +20,14 @@ def validate_runtime_settings() -> None:
     if settings.jwt_algorithm != "HS256":
         raise RuntimeError("Only HS256 JWT algorithm is supported")
 
-    if settings.app_env == "dev":
-        return
+    if settings.postgres_password == "change_me":
+        raise RuntimeError("POSTGRES_PASSWORD must be changed")
 
-    if settings.app_debug:
-        raise RuntimeError("APP_DEBUG must be false outside dev")
+    if settings.jwt_secret_key == "change_me":
+        raise RuntimeError("JWT_SECRET_KEY must be changed")
 
-    if settings.postgres_password in {"change_me", "change_me_dev_only"}:
-        raise RuntimeError("POSTGRES_PASSWORD must be changed outside dev")
-
-    if settings.jwt_secret_key.startswith("change_me"):
-        raise RuntimeError("JWT_SECRET_KEY must be changed outside dev")
-
-    if settings.api_key_pepper.startswith("change_me"):
-        raise RuntimeError("API_KEY_PEPPER must be changed outside dev")
+    if settings.api_key_pepper == "change_me":
+        raise RuntimeError("API_KEY_PEPPER must be changed")
 
 
 @asynccontextmanager
